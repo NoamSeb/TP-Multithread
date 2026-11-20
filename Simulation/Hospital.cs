@@ -9,7 +9,7 @@ namespace MiniHospital.Simulation
     public class Hospital
     {
         //configuration du TP: valeur de 0 = mode classique, autrmement le numéro de la question permet de mettre les comportements dans le mode adapté à la question
-        public static int CurrentQuestion { get; internal set; } = 0;
+        public static int CurrentQuestion { get; internal set; } = 2;
 
         //public pour l'affichage uniquement
         public List<Room> Rooms { get; private set; } = new List<Room>();

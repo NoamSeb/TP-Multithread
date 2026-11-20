@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "8IC4J/0frgI=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\nofla\\Documents\\IIM\\Annee4\\Multithreading\\MiniHospital\\MiniHospital.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\nofla\\.nuget\\packages\\raylib-cs\\8.1.0\\raylib-cs.8.1.0.nupkg.sha512"
+  ],
+  "logs": []
+}

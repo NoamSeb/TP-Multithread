@@ -19,6 +19,9 @@ namespace MiniHospital.Simulation.Characters
         private float waitingStartedAt;
         private Slot? waitingSeat;
         private float maxPatience;
+        private Thread pThread;
+
+        object verrou1 = new();
 
         public Patient(int spriteIndex, Hospital hospital, float maxPatience) : base(spriteIndex)
         {
@@ -26,6 +29,8 @@ namespace MiniHospital.Simulation.Characters
             SetRenderScale(CharacterConfig.PatientScale);
             gaugeSprite = new GaugeSprite();
             this.maxPatience = maxPatience;
+            pThread = new Thread(Brain);
+            pThread.Start();
         }
 
         private enum Step
@@ -45,14 +50,22 @@ namespace MiniHospital.Simulation.Characters
         public override void Update(float deltaTime)
         {
             base.Update(deltaTime);
-            gaugeSprite.Position = position + CharacterConfig.PatienceGaugePosition;
+            lock (verrou1)
+            {
+                gaugeSprite.Position = position + CharacterConfig.PatienceGaugePosition;
+            }
+
+            if (!pThread.IsAlive)
+            {
+                pThread.Join();
+            }
         }
 
         public override void GetRenderSprites(List<Sprite> list)
         {
             base.GetRenderSprites(list);
             if (step == Step.WaitingForReception || step == Step.WaitingForRoom)
-            	list.Add(gaugeSprite.Copy());
+                list.Add(gaugeSprite.Copy());
         }
 
         private void SetCurrentStep(Step next)
@@ -60,7 +73,7 @@ namespace MiniHospital.Simulation.Characters
             Chaos.ExecuteIfEnabled();
             step = next;
 
-            if(Hospital.CurrentQuestion != 0)
+            if (Hospital.CurrentQuestion != 0)
             {
                 //cas spéciaux pour les exercices
                 if (Hospital.CurrentQuestion == 1 && next == Step.AtReception ||
@@ -69,7 +82,6 @@ namespace MiniHospital.Simulation.Characters
                 {
                     StartLeaving(false);
                 }
-
             }
         }
 
@@ -110,7 +122,7 @@ namespace MiniHospital.Simulation.Characters
         private bool TryGotoReception()
         {
             Reception? reception = hospital.TryGetReception();
-            if(reception != null)
+            if (reception != null)
             {
                 reception.AssignPatient(this);
                 AssignedReception = reception;
@@ -120,6 +132,7 @@ namespace MiniHospital.Simulation.Characters
                 SetCurrentStep(Step.GoingToReception);
                 return true;
             }
+
             return false;
         }
 
@@ -142,7 +155,7 @@ namespace MiniHospital.Simulation.Characters
         private bool WaitOrGiveUp()
         {
             float remaining = 1f -
-                (hospital.ElapsedTimeSinceStart - waitingStartedAt) / maxPatience;
+                              (hospital.ElapsedTimeSinceStart - waitingStartedAt) / maxPatience;
             gaugeSprite.Value = Math.Clamp(remaining, 0f, 1f);
             SetBubbletype(remaining < 0.25f ? BubbleType.Angry : BubbleType.Wait);
 
@@ -173,93 +186,107 @@ namespace MiniHospital.Simulation.Characters
 
         protected override void Brain()
         {
-            if (hospital.Phase != Hospital.DayPhase.Running &&
-                step != Step.InConsultation && step != Step.AtReception &&
-                step != Step.Leaving && step != Step.Finished)
+            while (step != Step.Finished)
             {
-                StartLeaving(false);
-                return;
-            }
-            
-            switch (step)
-            {
-                case Step.Arriving:
-                    //cas spéciaux pour les exercices
-                    if (Hospital.CurrentQuestion == 1)
+                if (hospital.Phase != Hospital.DayPhase.Running &&
+                    step != Step.InConsultation && step != Step.AtReception &&
+                    step != Step.Leaving && step != Step.Finished)
+                {
+                    StartLeaving(false);
+                    return;
+                }
+
+                lock (verrou1)
+                {
+                    switch (step)
                     {
-                        MoveTo(HospitalLayout.ReceptionPatients[0]);
-                        SetCurrentStep(Step.GoingToReception);
+                        case Step.Arriving:
+                            //cas spéciaux pour les exercices
+                            if (Hospital.CurrentQuestion == 1)
+                            {
+                                MoveTo(HospitalLayout.ReceptionPatients[0]);
+                                SetCurrentStep(Step.GoingToReception);
+                            }
+                            else if (Hospital.CurrentQuestion == 2)
+                            {
+                                GoToWaiting();
+                            }
+                            else if (!TryGotoReception())
+                            {
+                                GoToWaiting();
+                            }
+
+                            break;
+
+                        case Step.GoingToReception:
+                            if (!IsMoving)
+                            {
+                                SetCurrentStep(Step.AtReception);
+                                if (step == Step.AtReception)
+                                    AssignedReception!.Staff!.HandlePatient(this);
+                            }
+
+                            break;
+
+                        case Step.AtReception:
+                            break;
+
+                        case Step.GoingToWaiting:
+                            if (!IsMoving)
+                            {
+                                waitingStartedAt = hospital.ElapsedTimeSinceStart;
+                                gaugeSprite.Value = 1f;
+                                SetCurrentStep(AssignedRoom == null ? Step.WaitingForReception : Step.WaitingForRoom);
+                            }
+
+                            break;
+
+                        case Step.WaitingForReception:
+                            if (!WaitOrGiveUp())
+                                TryGotoReception();
+                            break;
+
+                        case Step.WaitingForRoom:
+                            if (WaitOrGiveUp())
+                                break;
+
+                            if (AssignedRoom != null && AssignedRoom.IsOpen &&
+                                AssignedRoom.Occupant == null &&
+                                AssignedRoom.Staff?.IsAvailable == true)
+                            {
+                                AssignedRoom.AssignPatient(this);
+                                ReleaseWaitingSeat();
+                                MoveTo(AssignedRoom);
+                                SetBubbletype(BubbleType.Health);
+                                SetCurrentStep(Step.GoingToRoom);
+                            }
+
+                            break;
+
+                        case Step.GoingToRoom:
+                            if (!IsMoving)
+                            {
+                                AssignedRoom!.Staff!.HandlePatient(this);
+                                SetCurrentStep(Step.InConsultation);
+                            }
+
+                            break;
+
+                        case Step.InConsultation:
+                            break;
+
+                        case Step.Leaving:
+                            if (!IsMoving)
+                            {
+                                SetCurrentStep(Step.Finished);
+                                hospital.RegisterPatientDeparture(this, wasTreated);
+                            }
+
+                            break;
                     }
-                    else if (Hospital.CurrentQuestion == 2)
-                    {
-                        GoToWaiting();
-                    }
-                    else if (!TryGotoReception())
-                    {
-                        GoToWaiting();
-                    }
-                    break;
+                }
 
-                case Step.GoingToReception:
-                    if (!IsMoving)
-                    {
-                        SetCurrentStep(Step.AtReception);
-                        if(step == Step.AtReception)
-                            AssignedReception!.Staff!.HandlePatient(this);
-                    }
-                    break;
-
-                case Step.AtReception:
-                    break;
-
-                case Step.GoingToWaiting:
-                    if (!IsMoving)
-                    {
-                        waitingStartedAt = hospital.ElapsedTimeSinceStart;
-                        gaugeSprite.Value = 1f;
-                        SetCurrentStep(AssignedRoom == null ? Step.WaitingForReception : Step.WaitingForRoom);
-                    }
-                    break;
-
-                case Step.WaitingForReception:
-                    if (!WaitOrGiveUp())
-                        TryGotoReception();
-                    break;
-
-                case Step.WaitingForRoom:
-                    if (WaitOrGiveUp())
-                        break;
-
-                    if (AssignedRoom != null && AssignedRoom.IsOpen &&
-                        AssignedRoom.Occupant == null &&
-                        AssignedRoom.Staff?.IsAvailable == true)
-                    {
-                        AssignedRoom.AssignPatient(this);
-                        ReleaseWaitingSeat();
-                        MoveTo(AssignedRoom);
-                        SetBubbletype(BubbleType.Health);
-                        SetCurrentStep(Step.GoingToRoom);
-                    }
-                    break;
-
-                case Step.GoingToRoom:
-                    if (!IsMoving)
-                    {
-                        AssignedRoom!.Staff!.HandlePatient(this);
-                        SetCurrentStep(Step.InConsultation);
-                    }
-                    break;
-
-                case Step.InConsultation:
-                    break;
-
-                case Step.Leaving:
-                    if (!IsMoving)
-                    {
-                        SetCurrentStep(Step.Finished);
-                        hospital.RegisterPatientDeparture(this, wasTreated);
-                    }
-                    break;
+                Thread.Sleep(100);
             }
         }
     }
