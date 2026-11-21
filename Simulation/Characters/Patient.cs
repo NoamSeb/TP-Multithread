@@ -89,10 +89,11 @@ namespace MiniHospital.Simulation.Characters
         {
             if (step != Step.AtReception || AssignedReception == null)
                 throw new InvalidOperationException("Enregistrement termine hors de l'accueil");
-
+            
             AssignedRoom = room;
             AssignedReception.ReleasePatient(this);
             AssignedReception = null;
+            hospital.availableReception.Release();
             if (AssignedRoom == null || hospital.Phase != Hospital.DayPhase.Running)
                 StartLeaving(false);
             else
@@ -122,6 +123,7 @@ namespace MiniHospital.Simulation.Characters
         private bool TryGotoReception()
         {
             Reception? reception = hospital.TryGetReception();
+            
             if (reception != null)
             {
                 reception.AssignPatient(this);
