@@ -20,6 +20,7 @@ namespace MiniHospital.Simulation.Characters
         private Slot? waitingSeat;
         private float maxPatience;
         private Thread pThread;
+        private Room? lockedRoom;
 
         object verrou1 = new();
 
@@ -190,6 +191,12 @@ namespace MiniHospital.Simulation.Characters
         {
             while (step != Step.Finished)
             {
+                if (lockedRoom != null && step != Step.GoingToRoom && step != Step.InConsultation)
+                {
+                    lockedRoom.ReleaseMutex();
+                    lockedRoom = null;
+                }
+
                 if (hospital.Phase != Hospital.DayPhase.Running &&
                     step != Step.InConsultation && step != Step.AtReception &&
                     step != Step.Leaving && step != Step.Finished)
@@ -251,11 +258,13 @@ namespace MiniHospital.Simulation.Characters
                         case Step.WaitingForRoom:
                             if (WaitOrGiveUp())
                                 break;
-
+                            
                             if (AssignedRoom != null && AssignedRoom.IsOpen &&
                                 AssignedRoom.Occupant == null &&
-                                AssignedRoom.Staff?.IsAvailable == true)
+                                AssignedRoom.Staff?.IsAvailable == true &&
+                                AssignedRoom.TakeMutex())
                             {
+                                lockedRoom = AssignedRoom;
                                 AssignedRoom.AssignPatient(this);
                                 ReleaseWaitingSeat();
                                 MoveTo(AssignedRoom);
