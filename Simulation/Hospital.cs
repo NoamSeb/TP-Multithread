@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using MiniHospital.Config;
 using MiniHospital.Rendering;
 using MiniHospital.Simulation.Characters;
@@ -48,10 +49,12 @@ namespace MiniHospital.Simulation
         public static bool CallBrainOnUpdate { get; set; }
 
         private List<Sprite> FurnituresSprites = new List<Sprite>();
-
+        
         private List<Character> characters = new List<Character>();
-        private List<Slot> freeSeats = new();
-
+        private object charactersLock = new object();
+        // private List<Slot> freeSeats = new();
+        private ConcurrentBag<Slot> freeSeats = new ConcurrentBag<Slot>();
+        
         private List<Reception> receptions = new List<Reception>();
         private List<Employee> employeesInBus = new List<Employee>();
         
@@ -93,12 +96,19 @@ namespace MiniHospital.Simulation
             }
 
             freeSeats.Clear();
-            freeSeats.AddRange(HospitalLayout.WaitingSeats);
+           
+            foreach (Slot waitingSeat in HospitalLayout.WaitingSeats)
+            {
+                freeSeats.Add(waitingSeat);
+            }
 
             InitializeFurniture();
             Navigation.InitFullGraph();
 
-            characters.Clear();
+            lock (charactersLock)
+            {
+                characters.Clear();
+            }
             ElapsedTimeSinceStart = 0;
             CallBrainOnUpdate = Hospital.CurrentQuestion == 0? true : false;
         }
@@ -108,9 +118,13 @@ namespace MiniHospital.Simulation
             deltaTime *= SpeedMultiplier;
             ElapsedTimeSinceStart += deltaTime;
             HandleDay(deltaTime);
-
-            // copie pour autoriser la suppression du personnage courant dans Brain() sans causer d'exception
-            foreach (var character in characters.ToArray())
+            
+            Character[] copy;
+            lock (charactersLock)
+            {
+                copy = characters.ToArray();
+            }
+            foreach (Character character in copy)
             {
                 character.Update(deltaTime);
             }
@@ -178,9 +192,12 @@ namespace MiniHospital.Simulation
         {
 
             var list = new List<Sprite>(FurnituresSprites);
-            foreach (var character in characters)
+            lock (charactersLock)
             {
-                character.GetRenderSprites(list);
+                foreach (var character in characters)
+                {
+                    character.GetRenderSprites(list);
+                }
             }
             return list;
         }
@@ -223,8 +240,11 @@ namespace MiniHospital.Simulation
 
         public void StartDay(DayConfig config)
         {
-            if (characters.Count != 0)
-                throw new Exception("Des personnages sont encore presents");
+            lock (charactersLock)
+            {
+                if (characters.Count != 0)
+                    throw new Exception("Des personnages sont encore presents");
+            }
             if (DayNumber > 0 && freeSeats.Count != HospitalLayout.WaitingSeats.Length)
                 throw new Exception("Certains sièges n'ont pas été libérés la veille");
             if(employeesInBus.Count > 0)
@@ -244,7 +264,11 @@ namespace MiniHospital.Simulation
 
 
             freeSeats.Clear();
-            freeSeats.AddRange(HospitalLayout.WaitingSeats);
+            
+            foreach (Slot waitingSeat in HospitalLayout.WaitingSeats)
+            {
+                freeSeats.Add(waitingSeat);
+            }
 
             // Déterminer les salles ouvertes.
             int generalistIndex = 0;
@@ -295,7 +319,10 @@ namespace MiniHospital.Simulation
 
                 reception.Staff = employee;
                 employee.PlaceAt(reception.StaffSlot);
-                characters.Add(employee);
+                lock (charactersLock)
+                {
+                    characters.Add(employee);
+                }
                 ++EmployeeCount;
             }
 
@@ -326,7 +353,10 @@ namespace MiniHospital.Simulation
                 );
 
                 room.Staff = employee;
-                characters.Add(employee);
+                lock (charactersLock)
+                {
+                    characters.Add(employee);
+                }
                 ++EmployeeCount;
             }
 
@@ -347,25 +377,21 @@ namespace MiniHospital.Simulation
 
             patient.PlaceAt(NavNode.Outside);
 
-            characters.Add(patient);
+            lock (charactersLock)
+            {
+                characters.Add(patient);
+            }
 
         }
 
         public Slot TakeFreeSeat()
         {
-            Slot seat;
-            if (freeSeats.Count == 0)
+            if (!freeSeats.TryTake(out Slot? seat))
             {
-                //on renvoie une place debout non réservée. Pour le moment les persos vont stack dessus, pas grave c'est un TP pas un vrai jeu...
                 seat = HospitalLayout.StandingWaitingSlots[Random.Shared.Next(HospitalLayout.StandingWaitingSlots.Length)];
-            }else
-            {
-                seat = freeSeats[0];
-                Chaos.ExecuteIfEnabled();
-                freeSeats.RemoveAt(0);
             }
-
-
+            Chaos.ExecuteIfEnabled();
+            
             return seat;
         }
 
@@ -386,9 +412,12 @@ namespace MiniHospital.Simulation
 
         public void RegisterEmployeeBoarding(Employee employee)
         {
-            if (!characters.Remove(employee))
+            lock (charactersLock)
             {
-                throw new Exception("Enregistrement de départ d'un employé non présent dans l'hopital");
+                if (!characters.Remove(employee))
+                {
+                    throw new Exception("Enregistrement de départ d'un employé non présent dans l'hopital");
+                }
             }
             if (employeesInBus.Contains(employee))
             {
@@ -400,9 +429,13 @@ namespace MiniHospital.Simulation
 
         public void RegisterPatientDeparture(Patient patient, bool treated)
         {
-            if (!characters.Remove(patient))
+            // appelé depuis le thread du patient : on retire sous le même verrou que le rendu
+            lock (charactersLock)
             {
-                throw new Exception("Enregistrement de départ d'un patient non présent dans l'hopital");
+                if (!characters.Remove(patient))
+                {
+                    throw new Exception("Enregistrement de départ d'un patient non présent dans l'hopital");
+                }
             }
 
             DayStats.Active--;
