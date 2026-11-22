@@ -60,7 +60,7 @@ namespace MiniHospital.Simulation
         private List<Reception> receptions = new List<Reception>();
         private List<Employee> employeesInBus = new List<Employee>();
 
-        public Semaphore availableReception = new Semaphore(3, 3);
+        public Semaphore availableReception;
 
         private object statsLock = new object();
         public Barrier eBarrier = new Barrier(0);
@@ -274,6 +274,8 @@ namespace MiniHospital.Simulation
             EmployeeCount = 0;
             
             Phase = DayPhase.Running;
+            
+            availableReception = new Semaphore(config.ReceptionistCount, config.ReceptionistCount);
 
 
             freeSeats.Clear();
@@ -499,6 +501,7 @@ namespace MiniHospital.Simulation
                         candidate.Staff.IsAvailable)
                         return candidate;
                 }
+                availableReception.Release();
             }
 
             return null;

@@ -176,7 +176,10 @@ namespace MiniHospital.Simulation.Characters
             ReleaseWaitingSeat();
 
             if (AssignedReception?.Occupant == this)
+            {
                 AssignedReception.ReleasePatient(this);
+                hospital.availableReception.Release();
+            }
             AssignedReception = null;
 
             if (AssignedRoom?.Occupant == this)
