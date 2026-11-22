@@ -15,7 +15,8 @@
         {
             if (treated)
             {
-                Combo++;
+                // Combo++;
+                Interlocked.Increment(ref Combo);
                 Score += 100 * Combo;
                 if (Combo > BestCombo)
                     BestCombo = Combo;

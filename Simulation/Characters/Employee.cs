@@ -39,6 +39,7 @@ namespace MiniHospital.Simulation.Characters
             step = Step.WaitForPatient;
             this.patientHandlingRequiredTime = patientHandlingRequiredTime;
             eThread = new Thread(Brain);
+            eThread.IsBackground = true;
             eThread.Start();
         }
 
@@ -63,6 +64,7 @@ namespace MiniHospital.Simulation.Characters
             if (step != Step.WaitingForBusDeparting)
                 throw new InvalidOperationException("Employé absent du bus");
             step = Step.Finished;
+            hospital.eBarrier.RemoveParticipant();
         }
 
         public void HandlePatient(Patient newPatient)

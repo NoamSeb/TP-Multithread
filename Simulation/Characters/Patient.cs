@@ -31,6 +31,7 @@ namespace MiniHospital.Simulation.Characters
             gaugeSprite = new GaugeSprite();
             this.maxPatience = maxPatience;
             pThread = new Thread(Brain);
+            pThread.IsBackground = true;
             pThread.Start();
         }
 
@@ -202,7 +203,8 @@ namespace MiniHospital.Simulation.Characters
                     step != Step.Leaving && step != Step.Finished)
                 {
                     StartLeaving(false);
-                    return;
+                    // return;
+                    continue;
                 }
 
                 lock (verrou1)

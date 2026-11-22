@@ -10,7 +10,7 @@ namespace MiniHospital.Simulation
     public class Hospital
     {
         //configuration du TP: valeur de 0 = mode classique, autrmement le numéro de la question permet de mettre les comportements dans le mode adapté à la question
-        public static int CurrentQuestion { get; internal set; } = 4;
+        public static int CurrentQuestion { get; internal set; } = 5;
 
         //public pour l'affichage uniquement
         public List<Room> Rooms { get; private set; } = new List<Room>();
@@ -61,6 +61,9 @@ namespace MiniHospital.Simulation
         private List<Employee> employeesInBus = new List<Employee>();
 
         public Semaphore availableReception = new Semaphore(3, 3);
+
+        private object statsLock = new object();
+        public Barrier eBarrier = new Barrier(0);
 
         //pour l'affichage
         public int EmployeesInBusCount => employeesInBus.Count;
@@ -269,6 +272,8 @@ namespace MiniHospital.Simulation
             transitionTimer = 0f;
             nextArrivalTime = ElapsedTimeSinceStart + config.PatientInterval.Sample();
             EmployeeCount = 0;
+            
+            Phase = DayPhase.Running;
 
 
             freeSeats.Clear();
@@ -335,6 +340,7 @@ namespace MiniHospital.Simulation
                 }
 
                 ++EmployeeCount;
+                eBarrier.AddParticipant();
             }
 
             // Créer un médecin par salle ouverte.
@@ -370,17 +376,20 @@ namespace MiniHospital.Simulation
                 }
 
                 ++EmployeeCount;
+                eBarrier.AddParticipant();
             }
-
-            Phase = DayPhase.Running;
         }
 
         private void SpawnPatient()
         {
-            DayStats.Arrived++;
-            TotalStats.Arrived++;
-            DayStats.Active++;
-            TotalStats.Active++;
+            Interlocked.Increment(ref DayStats.Arrived);
+            Interlocked.Increment(ref TotalStats.Arrived);
+            Interlocked.Increment(ref DayStats.Active);
+            Interlocked.Increment(ref TotalStats.Active);
+            // DayStats.Arrived++;
+            // TotalStats.Arrived++;
+            // DayStats.Active++;
+            // TotalStats.Active++;
 
             Patient patient = new(
                 CharacterConfig.PatientSpriteIds[Random.Shared.Next(CharacterConfig.PatientSpriteIds.Length)],
@@ -441,11 +450,11 @@ namespace MiniHospital.Simulation
             }
 
             employeesInBus.Add(employee);
+            eBarrier.SignalAndWait();
         }
 
         public void RegisterPatientDeparture(Patient patient, bool treated)
         {
-            // appelé depuis le thread du patient : on retire sous le même verrou que le rendu
             lock (charactersLock)
             {
                 if (!characters.Remove(patient))
@@ -454,21 +463,30 @@ namespace MiniHospital.Simulation
                 }
             }
 
-            DayStats.Active--;
-            TotalStats.Active--;
-            if (treated)
+            lock (statsLock)
             {
-                DayStats.Treated++;
-                TotalStats.Treated++;
-            }
-            else
-            {
-                DayStats.Untreated++;
-                TotalStats.Untreated++;
-            }
+                // DayStats.Active--;
+                Interlocked.Decrement(ref DayStats.Active);
+                // TotalStats.Active--;
+                Interlocked.Decrement(ref TotalStats.Active);
+                if (treated)
+                {
+                    // DayStats.Treated++;
+                    Interlocked.Increment(ref DayStats.Treated);
+                    // TotalStats.Treated++;
+                    Interlocked.Increment(ref TotalStats.Treated);
+                }
+                else
+                {
+                    // DayStats.Untreated++;
+                    Interlocked.Increment(ref DayStats.Untreated);
+                    // TotalStats.Untreated++;
+                    Interlocked.Increment(ref TotalStats.Untreated);
+                }
 
-            DayStats.UpdateScore(treated);
-            TotalStats.UpdateScore(treated);
+                DayStats.UpdateScore(treated);
+                TotalStats.UpdateScore(treated);
+            }
         }
 
         public Reception? TryGetReception()
